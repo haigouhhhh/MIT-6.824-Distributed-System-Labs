@@ -42,12 +42,13 @@ func (mr *Master) merge() {
 	if err != nil {
 		log.Fatal("Merge: create ", err)
 	}
+
+	defer file.Close()
 	w := bufio.NewWriter(file)
 	for _, k := range keys {
 		fmt.Fprintf(w, "%s: %s\n", k, kvs[k])
 	}
 	w.Flush()
-	file.Close()
 }
 
 // removeFile is a simple wrapper around os.Remove that logs errors.

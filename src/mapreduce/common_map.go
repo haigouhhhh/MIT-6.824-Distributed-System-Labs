@@ -2,17 +2,22 @@ package mapreduce
 
 import (
 	"hash/fnv"
+	"log"
+	"io/ioutil"
+	"encoding/json"
+	"os"
+	"fmt"
 )
 
 // doMap manages one map task: it reads one of the input files
 // (inFile), calls the user-defined map function (mapF) for that file's
 // contents, and partitions the output into nReduce intermediate files.
 func doMap(
-	jobName string, // the name of the MapReduce job
-	mapTaskNumber int, // which map task this is
-	inFile string,
-	nReduce int, // the number of reduce task that will be run ("R" in the paper)
-	mapF func(file string, contents string) []KeyValue,
+jobName string, // the name of the MapReduce job
+mapTaskNumber int, // which map task this is
+inFile string,
+nReduce int, // the number of reduce task that will be run ("R" in the paper)
+mapF func(file string, contents string) []KeyValue,
 ) {
 	//
 	// You will need to write this function.
@@ -53,10 +58,58 @@ func doMap(
 	//
 	// Remember to close the file after you have written all the values!
 	//
+
+	data := ReadContent(inFile)
+	kvs := mapF(inFile, data);
+
+	for _, kv := range kvs {
+		index := ihash(kv.Key) % nReduce
+		reduceFileName := reduceName(jobName, mapTaskNumber, index)
+		file := CreateFileAndOpenAsWriter(reduceFileName)
+
+		enc := json.NewEncoder(file)
+		err := enc.Encode(&kv)
+
+		if err != nil {
+			panic(err)
+		}
+
+		file.Close()
+
+	}
+}
+
+func CreateFileAndOpenAsWriter(path string) *os.File {
+	// detect if file exists
+	var _, err = os.Stat(path)
+
+	// create file if not exists
+	if os.IsNotExist(err) {
+		var file, err = os.Create(path)
+		defer file.Close()
+		if (err != nil) {
+			fmt.Println(err.Error())
+			panic(err)
+		}
+	}
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND, 0644)
+	if err != nil {
+		panic(err)
+	}
+	return file
 }
 
 func ihash(s string) int {
 	h := fnv.New32a()
 	h.Write([]byte(s))
 	return int(h.Sum32() & 0x7fffffff)
+}
+
+func ReadContent(path string) string {
+	bytes, err := ioutil.ReadFile(path)
+	if err != nil {
+		log.Fatal("check: ", err)
+		panic(err)
+	}
+	return string(bytes)
 }

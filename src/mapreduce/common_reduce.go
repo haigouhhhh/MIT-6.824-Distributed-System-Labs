@@ -1,16 +1,23 @@
 package mapreduce
 
+import (
+	"encoding/json"
+	"sort"
+	"bytes"
+)
+
 // doReduce manages one reduce task: it reads the intermediate
 // key/value pairs (produced by the map phase) for this task, sorts the
 // intermediate key/value pairs by key, calls the user-defined reduce function
 // (reduceF) for each key, and writes the output to disk.
 func doReduce(
-	jobName string, // the name of the whole MapReduce job
-	reduceTaskNumber int, // which reduce task this is
-	outFile string, // write the output here
-	nMap int, // the number of map tasks that were run ("M" in the paper)
-	reduceF func(key string, values []string) string,
+jobName string, // the name of the whole MapReduce job
+reduceTaskNumber int, // which reduce task this is
+outFile string, // write the output here
+nMap int, // the number of map tasks that were run ("M" in the paper)
+reduceF func(key string, values []string) string,
 ) {
+
 	//
 	// You will need to write this function.
 	//
@@ -43,4 +50,34 @@ func doReduce(
 	// }
 	// file.Close()
 	//
+
+	data := make(map[string][]string)
+	for m := 0; m < nMap; m++ {
+		reduceFileName := reduceName(jobName, m, reduceTaskNumber)
+
+		content := ReadContent(reduceFileName)
+		dec := json.NewDecoder(bytes.NewBufferString(content))
+		for {
+			var kv KeyValue
+			err := dec.Decode(&kv)
+			if err != nil {
+				break
+			}
+			data[kv.Key] = append(data[kv.Key], kv.Value)
+		}
+	}
+
+	file := CreateFileAndOpenAsWriter(outFile)
+	defer file.Close()
+
+	enc := json.NewEncoder(file)
+
+	var keys []string
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		enc.Encode(KeyValue{key, reduceF(key, data[key])})
+	}
 }
