@@ -8,6 +8,7 @@ import (
 	"time"
 	"strings"
 	"fmt"
+	"bytes"
 )
 
 const Debug = 0
@@ -268,15 +269,48 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.clientTableMap = make(map[uint64]*ClientTable)
 
 	// You may need initialization code here.
+	kv.restoreFromSnapShot(kv.rf.ReadSnapShot(persister.ReadSnapshot()))
 
 	go kv.listenOnApplyCh(kv.applyCh)
 
 	return kv
 }
 
+func (kv *RaftKV) snapshot(index int) (doSnapshot bool) {
+	if kv.maxraftstate == -1 {
+		return
+	}
+	size := kv.rf.GetRaftStateSize()
+	if size > kv.maxraftstate {
+		kv.mu.Lock()
+		defer kv.mu.Unlock()
+		DPrintf("kv %v, begin snapshot", kv.me)
+		kv.rf.TruncateLog(index, kv.encodeToSnapShot())
+		doSnapshot = true
+		DPrintf("kv %v, end snapshot", kv.me)
+	}
+	return
+
+}
+
 func (kv *RaftKV) listenOnApplyCh(applyCh chan raft.ApplyMsg) {
 	// Your code here.
 	for applyMsg := range applyCh {
+		if applyMsg.UseSnapshot {
+			kv.mu.Lock()
+			for _, v := range kv.waitMap {
+				v := v
+				go func() {
+					v.err <- "error, no more leader since get InstallSnapShot"
+				}()
+
+			}
+
+			kv.restoreFromSnapShot(applyMsg.Snapshot)
+			kv.mu.Unlock()
+
+			continue
+		}
 		op := applyMsg.Command.(Op)
 		opPtr := &op
 
@@ -316,9 +350,58 @@ func (kv *RaftKV) listenOnApplyCh(applyCh chan raft.ApplyMsg) {
 			}
 			kv.mu.Unlock()
 		}
+
+		kv.snapshot(applyMsg.Index)
 		DPrintf("kv %v, applyMsg: %+v", kv.me, applyMsg)
 
 	}
+}
+
+func (kv *RaftKV) restoreFromSnapShot(data []byte) {
+	if data == nil || len(data) == 0 {
+		return
+	}
+	DPrintf("kv %v begin restoreFromSnapShot, data %v", kv.me, data)
+	r := bytes.NewBuffer(data)
+	d := gob.NewDecoder(r)
+	var kvPair map[string]string
+	err := d.Decode(&kvPair)
+	if err != nil {
+		panic(err)
+	}
+	DPrintf("kv pair: %v", kvPair)
+	kv.kvPair = kvPair
+
+	var clientTableMap map[uint64]uint64
+	d.Decode(&clientTableMap)
+	DPrintf("clientTable: %v", clientTableMap)
+	kv.clientTableMap = make(map[uint64]*ClientTable)
+	for client, serialNo := range clientTableMap {
+		kv.clientTableMap[client] = &ClientTable{
+			lastSerialNo: serialNo,
+		}
+	}
+}
+
+func (kv *RaftKV) encodeToSnapShot() []byte {
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	kvPair := make(map[string]string)
+
+	for k, v := range kv.kvPair {
+		kvPair[k] = v
+	}
+
+	clientTableMap := make(map[uint64]uint64)
+	for k, v := range kv.clientTableMap {
+		v.mu.Lock()
+		clientTableMap[k] = v.lastSerialNo
+		v.mu.Unlock()
+	}
+
+	e.Encode(kvPair)
+	e.Encode(clientTableMap)
+	return w.Bytes()
 }
 
 func (kv *RaftKV) getFromCache(op *Op) (cacheVal string, hitCache bool) {
