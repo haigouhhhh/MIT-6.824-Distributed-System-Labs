@@ -4,14 +4,26 @@ package shardmaster
 // Shardmaster clerk.
 //
 
-import "labrpc"
+import "../labrpc"
 import "time"
 import "crypto/rand"
-import "math/big"
+import (
+	"math/big"
+	"sync"
+	"sync/atomic"
+)
+
+var (
+	ID uint64
+)
 
 type Clerk struct {
-	servers []*labrpc.ClientEnd
+	servers  []*labrpc.ClientEnd
 	// Your data here.
+	mu       sync.Mutex
+	leader   int64
+	serialNo uint64
+	id       uint64
 }
 
 func nrand() int64 {
@@ -25,13 +37,22 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// Your code here.
+	ck.mu.Lock()
+	defer ck.mu.Unlock()
+
+	ck.leader = -1
+	ck.id = atomic.AddUint64(&ID, uint64(1))
+	ck.serialNo = 1
 	return ck
 }
 
 func (ck *Clerk) Query(num int) Config {
-	args := &QueryArgs{}
-	// Your code here.
-	args.Num = num
+	args := &QueryArgs{
+		Num:num,
+		ClientId:ck.id,
+		SerialNo:ck.incrementSN(),
+	}
+
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
@@ -46,9 +67,11 @@ func (ck *Clerk) Query(num int) Config {
 }
 
 func (ck *Clerk) Join(servers map[int][]string) {
-	args := &JoinArgs{}
-	// Your code here.
-	args.Servers = servers
+	args := &JoinArgs{
+		Servers: servers,
+		ClientId:ck.id,
+		SerialNo:ck.incrementSN(),
+	}
 
 	for {
 		// try each known server.
@@ -64,9 +87,11 @@ func (ck *Clerk) Join(servers map[int][]string) {
 }
 
 func (ck *Clerk) Leave(gids []int) {
-	args := &LeaveArgs{}
-	// Your code here.
-	args.GIDs = gids
+	args := &LeaveArgs{
+		GIDs: gids,
+		ClientId:ck.id,
+		SerialNo:ck.incrementSN(),
+	}
 
 	for {
 		// try each known server.
@@ -82,10 +107,12 @@ func (ck *Clerk) Leave(gids []int) {
 }
 
 func (ck *Clerk) Move(shard int, gid int) {
-	args := &MoveArgs{}
-	// Your code here.
-	args.Shard = shard
-	args.GID = gid
+	args := &MoveArgs{
+		Shard:shard,
+		GID:gid,
+		ClientId:ck.id,
+		SerialNo:ck.incrementSN(),
+	}
 
 	for {
 		// try each known server.
@@ -98,4 +125,18 @@ func (ck *Clerk) Move(shard int, gid int) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+func (ck *Clerk)getLeaderOrRandom() int64 {
+	ck.mu.Lock()
+	defer ck.mu.Unlock()
+	i := ck.leader
+	if i == -1 {
+		i = nrand() % int64(len(ck.servers))
+	}
+	return i
+}
+
+func (ck *Clerk) incrementSN() uint64 {
+	return atomic.AddUint64(&ck.serialNo, uint64(1))
 }

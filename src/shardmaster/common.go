@@ -1,5 +1,10 @@
 package shardmaster
 
+import (
+	"bytes"
+	"encoding/gob"
+)
+
 //
 // Master shard server: assigns shards to replication groups.
 //
@@ -38,7 +43,37 @@ const (
 type Err string
 
 type JoinArgs struct {
-	Servers map[int][]string // new GID -> servers mappings
+	Servers  map[int][]string // new GID -> servers mappings
+
+	ClientId uint64
+	SerialNo uint64
+}
+
+func (arg *JoinArgs) toOP() Op {
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(arg.Servers)
+
+	return Op{
+		Op:"JOIN",
+		ArgValue:w.Bytes(),
+		ClientId:arg.ClientId,
+		SerialNo:arg.SerialNo,
+	}
+
+}
+
+func (arg *JoinArgs) fromOP(op *Op) {
+	r := bytes.NewBuffer(op.ArgValue)
+	d := gob.NewDecoder(r)
+	var servers map[int][]string
+
+	d.Decode(&servers)
+
+	arg.Servers = servers
+	arg.SerialNo = op.SerialNo
+	arg.ClientId = op.ClientId
+
 }
 
 type JoinReply struct {
@@ -47,7 +82,38 @@ type JoinReply struct {
 }
 
 type LeaveArgs struct {
-	GIDs []int
+	GIDs     []int
+
+	ClientId uint64
+	SerialNo uint64
+}
+
+func (arg *LeaveArgs) toOP() Op {
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(arg.GIDs)
+
+	return Op{
+		Op:"LEAVE",
+		ArgValue:w.Bytes(),
+		ClientId:arg.ClientId,
+		SerialNo:arg.SerialNo,
+	}
+
+}
+
+func (arg *LeaveArgs) fromOP(op *Op) {
+
+	r := bytes.NewBuffer(op.ArgValue)
+	d := gob.NewDecoder(r)
+	var gids []int
+
+	d.Decode(&gids)
+
+	arg.GIDs = gids
+	arg.SerialNo = op.SerialNo
+	arg.ClientId = op.ClientId
+
 }
 
 type LeaveReply struct {
@@ -56,8 +122,43 @@ type LeaveReply struct {
 }
 
 type MoveArgs struct {
-	Shard int
-	GID   int
+	Shard    int
+	GID      int
+
+	ClientId uint64
+	SerialNo uint64
+}
+
+func (arg *MoveArgs) toOP() Op {
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(arg.Shard)
+	e.Encode(arg.GID)
+
+	return Op{
+		Op:"MOVE",
+		ArgValue:w.Bytes(),
+		ClientId:arg.ClientId,
+		SerialNo:arg.SerialNo,
+	}
+
+}
+
+func (arg *MoveArgs) fromOP(op *Op) {
+
+	r := bytes.NewBuffer(op.ArgValue)
+	d := gob.NewDecoder(r)
+	var shard int
+	var gid int
+
+	d.Decode(&shard)
+	d.Decode(&gid)
+
+	arg.Shard = shard
+	arg.GID = gid
+	arg.SerialNo = op.SerialNo
+	arg.ClientId = op.ClientId
+
 }
 
 type MoveReply struct {
@@ -66,11 +167,42 @@ type MoveReply struct {
 }
 
 type QueryArgs struct {
-	Num int // desired config number
+	Num      int // desired config number
+
+	ClientId uint64
+	SerialNo uint64
 }
 
 type QueryReply struct {
 	WrongLeader bool
 	Err         Err
 	Config      Config
+}
+
+func (arg *QueryArgs) toOP() Op {
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(arg.Num)
+
+	return Op{
+		Op:"QUERY",
+		ArgValue:w.Bytes(),
+		ClientId:arg.ClientId,
+		SerialNo:arg.SerialNo,
+	}
+
+}
+
+func (arg *QueryArgs) fromOP(op *Op) {
+
+	r := bytes.NewBuffer(op.ArgValue)
+	d := gob.NewDecoder(r)
+
+	var num int
+	d.Decode(&num)
+
+	arg.Num = num
+	arg.SerialNo = op.SerialNo
+	arg.ClientId = op.ClientId
+
 }
