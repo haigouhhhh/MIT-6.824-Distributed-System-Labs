@@ -1,7 +1,7 @@
 package shardkv
 
-import "shardmaster"
-import "labrpc"
+import "../shardmaster"
+import "../labrpc"
 import "testing"
 import "os"
 
@@ -11,12 +11,12 @@ import "math/rand"
 import "encoding/base64"
 import "sync"
 import "runtime"
-import "raft"
+import "../raft"
 import "strconv"
 import "fmt"
 
 func randstring(n int) string {
-	b := make([]byte, 2*n)
+	b := make([]byte, 2 * n)
 	crand.Read(b)
 	s := base64.URLEncoding.EncodeToString(b)
 	return s[0:n]
@@ -42,27 +42,28 @@ type group struct {
 }
 
 type config struct {
-	mu  sync.Mutex
-	t   *testing.T
-	net *labrpc.Network
+	mu            sync.Mutex
+	t             *testing.T
+	net           *labrpc.Network
 
 	nmasters      int
 	masterservers []*shardmaster.ShardMaster
 	mck           *shardmaster.Clerk
 
-	ngroups int
-	n       int // servers per k/v group
-	groups  []*group
+	ngroups       int
+	n             int // servers per k/v group
+	groups        []*group
 
-	clerks       map[*Clerk][]string
-	nextClientId int
-	maxraftstate int
+	clerks        map[*Clerk][]string
+	nextClientId  int
+	maxraftstate  int
 }
 
 func (cfg *config) cleanup() {
 	for gi := 0; gi < cfg.ngroups; gi++ {
 		cfg.ShutdownGroup(gi)
 	}
+	stopCurrentWatcher()
 }
 
 // check that no server's log is too big.
@@ -71,7 +72,7 @@ func (cfg *config) checklogs() {
 		for i := 0; i < cfg.n; i++ {
 			raft := cfg.groups[gi].saved[i].RaftStateSize()
 			snap := len(cfg.groups[gi].saved[i].ReadSnapshot())
-			if cfg.maxraftstate >= 0 && raft > 2*cfg.maxraftstate {
+			if cfg.maxraftstate >= 0 && raft > 2 * cfg.maxraftstate {
 				cfg.t.Fatalf("persister.RaftStateSize() %v, but maxraftstate %v",
 					raft, cfg.maxraftstate)
 			}

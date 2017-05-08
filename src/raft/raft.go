@@ -84,6 +84,7 @@ type Raft struct {
 	applyChan            chan ApplyMsg
 	lastIncludedIndex    int
 	lastIncludedTerm     int
+	Debug 	int
 }
 
 // return currentTerm and whether this server
@@ -122,8 +123,8 @@ func (rf *Raft) TruncateLog(lastIncludedIndex int, appData[]byte) {
 	rf.persister.SaveSnapshot(data)
 
 	rf.persist()
-	DPrintf("rf %v, lastIncludedIndex %v, lastIncludedTerm %v ", rf.me, rf.lastIncludedIndex, rf.lastIncludedTerm)
-	DPrintf("after snapshot, rf %v log is  %v", rf.me, rf.log)
+	rf.DPrintf("rf %v, lastIncludedIndex %v, lastIncludedTerm %v ", rf.me, rf.lastIncludedIndex, rf.lastIncludedTerm)
+	rf.DPrintf("after snapshot, rf %v log is  %v", rf.me, rf.log)
 
 }
 
@@ -154,7 +155,7 @@ func (rf *Raft) persist() {
 	rf.persister.SaveRaftState(data)
 
 	if len(rf.log) > 0 {
-		DPrintf("rf %+v, persist, votedFor %v, term %v, log %+v", rf.me, rf.votedFor, rf.term, rf.log[len(rf.log) - 1 ])
+		rf.DPrintf("rf %+v, persist, votedFor %v, term %v, last log entry %+v", rf.me, rf.votedFor, rf.term, rf.log[len(rf.log) - 1 ])
 	}
 
 }
@@ -177,7 +178,7 @@ func (rf *Raft) readPersist(data []byte) {
 	d.Decode(&rf.lastIncludedIndex)
 	d.Decode(&rf.lastIncludedTerm)
 
-	DPrintf("rf %+v, readPersist, votedFor %v, term %v, log %+v", rf.me, rf.votedFor, rf.term, rf.log)
+	rf.DPrintf("rf %+v, readPersist, votedFor %v, term %v, log %+v", rf.me, rf.votedFor, rf.term, rf.log)
 }
 
 func (rf *Raft) ReadSnapShot(data []byte) []byte {
@@ -282,7 +283,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	reply.Term = rf.term
 
-	DPrintf("rafter %+v with term %v, state %v, last log index %v, last log index term %v,  receive request from %+v", rf.me, rf.term, rf.state, rf.getLastIndex(), rf.getLastEntry().Term, args)
+	rf.DPrintf("rafter %+v with term %v, state %v, last log index %v, last log index term %v,  receive request from %+v", rf.me, rf.term, rf.state, rf.getLastIndex(), rf.getLastEntry().Term, args)
 
 	switch  {
 	case rf.term < args.Term:
@@ -305,8 +306,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if reply.VoteGranted {
 		rf.resetElectionTimeout()
 	}
-	DPrintf("result %+v", reply)
-	DPrintf("rafter %+v with term %v, state %v, votedFor %v", rf.me, rf.term, rf.state, rf.votedFor)
+	rf.DPrintf("result %+v", reply)
+	rf.DPrintf("rafter %+v with term %v, state %v, votedFor %v", rf.me, rf.term, rf.state, rf.votedFor)
 	return
 
 }
@@ -331,7 +332,7 @@ func (rf *Raft) InstallSnapShot(args *InstallSnapShotArgs, reply *InstallSnapSho
 	case rf.term == args.Term:
 		switch rf.state {
 		case Follower:
-			DPrintf("%v reset election timeout because of InstallSnapShot from %v", rf.me, args.LeaderId)
+			rf.DPrintf("%v reset election timeout because of InstallSnapShot from %v", rf.me, args.LeaderId)
 			rf.resetElectionTimeout()
 		case Candidate:
 			rf.becomeFollower(args.Term)
@@ -389,7 +390,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	case rf.term == args.Term:
 		switch rf.state {
 		case Follower:
-			DPrintf("%v reset election timeout because of AppendEntries from %v", rf.me, args.LeaderId)
+			rf.DPrintf("%v reset election timeout because of AppendEntries from %v", rf.me, args.LeaderId)
 			rf.resetElectionTimeout()
 		case Candidate:
 			rf.becomeFollower(args.Term)
@@ -400,18 +401,18 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = false
 	}
 
-	DPrintf("rf %v receive %+v", rf.me, args)
+	rf.DPrintf("rf %v receive %+v", rf.me, args)
 
 	matchLastIncludedIndex := rf.lastIncludedIndex == args.PrevLogIndex && rf.lastIncludedTerm == args.PrevLogTerm
 
 	if !matchLastIncludedIndex && (!rf.indexExist(args.PrevLogIndex) || rf.getEntryByIndex(args.PrevLogIndex).Term != args.PrevLogTerm) {
 		reply.Success = false
 	}
-	DPrintf("rf %v return leader %v AppendEntries response %+v", rf.me, args.LeaderId, reply)
+	rf.DPrintf("rf %v return leader %v AppendEntries response %+v", rf.me, args.LeaderId, reply)
 	if !reply.Success {
 		return
 	}
-	DPrintf("rf %v log before %+v", rf.me, rf.log)
+	rf.DPrintf("rf %v log before %+v", rf.me, rf.log)
 
 	for i, entry := range args.Entries {
 		if rf.indexExist(args.PrevLogIndex + 1 + i) {
@@ -423,7 +424,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.log = append(rf.log, entry)
 		}
 	}
-	DPrintf("rf %v log after %+v", rf.me, rf.log)
+	rf.DPrintf("rf %v log after %+v", rf.me, rf.log)
 
 	if args.LeaderCommit > rf.commitIndex {
 		if len(args.Entries) > 0 && args.LeaderCommit > args.PrevLogIndex + len(args.Entries) {
@@ -438,9 +439,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 func (rf *Raft) onElectionTimeout() {
 
-	DPrintf("rf %+v election timeout", rf.me)
+	rf.DPrintf("rf %+v election timeout", rf.me)
 	if rf.state == Follower {
-		DPrintf("rf %+v become candidate", rf.me)
+		rf.DPrintf("rf %+v become candidate", rf.me)
 		rf.becomeCandidate()
 	} else if rf.state == Candidate {
 		rf.startNewElection()
@@ -459,7 +460,7 @@ func (rf *Raft) onOtherTerm(otherTerm int) {
 
 //should be protected by rf.mu
 func (rf *Raft) resetElectionTimeout() {
-	DPrintf("rf %v reset timeout", rf.me)
+	rf.DPrintf("rf %v reset timeout", rf.me)
 	if rf.electionTimeoutTimer != nil {
 		rf.electionTimeoutTimer.Stop()
 	}
@@ -478,6 +479,7 @@ func (rf *Raft) resetElectionTimeout() {
 		}
 		rf.onElectionTimeout()
 
+		rf.DPrintf("hw")
 	}()
 	rf.electionTimeoutTimer = timer
 
@@ -575,7 +577,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		index = rf.appendLog(command)
 	}
 
-	DPrintf("rf %v receive command %v, index is %v ", rf.me, command, index)
+	rf.DPrintf("rf %v receive command %v, index is %v ", rf.me, command, index)
 	return index, term, isLeader
 }
 
@@ -665,7 +667,7 @@ func (rf *Raft) initLeader() {
 	}
 
 	rf.matchIndex = make([]int, len(rf.peers))
-	DPrintf("leader %v log is %+v, nextIndex is %+v", rf.me, rf.log, rf.nextIndex)
+	rf.DPrintf("leader %v log is %+v, nextIndex is %+v", rf.me, rf.log, rf.nextIndex)
 
 }
 
@@ -695,7 +697,7 @@ func (rf *Raft) indexExist(index int) bool {
 }
 
 func (rf *Raft) becomeLeader() {
-	DPrintf("%v become leader, term %v", rf.me, rf.term)
+	rf.DPrintf("%v become leader, term %v", rf.me, rf.term)
 	rf.initLeader()
 
 	if rf.electionTimeoutTimer != nil {
@@ -736,7 +738,7 @@ func (rf *Raft) sendHeartBeatToPeers() {
 
 					}
 					reply := InstallSnapShotReply{}
-					DPrintf("leader %v sent installSnapshot %+v, to %v", rf.me, args, peerIndex)
+					rf.DPrintf("leader %v sent installSnapshot %+v, to %v", rf.me, args, peerIndex)
 					rf.mu.Unlock()
 					ok := rf.sendInstallSnapShot(peerIndex, &args, &reply)
 					if ok {
@@ -744,7 +746,7 @@ func (rf *Raft) sendHeartBeatToPeers() {
 						rf.onOtherTerm(reply.Term)
 						if rf.state != Leader {
 							rf.persist()
-							DPrintf("leader %v become follower after InstallSnapShot response", rf.me)
+							rf.DPrintf("leader %v become follower after InstallSnapShot response", rf.me)
 							rf.mu.Unlock()
 							return
 						} else {
@@ -778,7 +780,7 @@ func (rf *Raft) sendHeartBeatToPeers() {
 					LeaderCommit: rf.commitIndex,
 				}
 
-				DPrintf("leader %v sent AppendEntries %+v, to %v", rf.me, args, peerIndex)
+				rf.DPrintf("leader %v sent AppendEntries %+v, to %v", rf.me, args, peerIndex)
 				leader := rf.me
 				_ = leader
 				rf.mu.Unlock()
@@ -786,7 +788,7 @@ func (rf *Raft) sendHeartBeatToPeers() {
 				reply := AppendEntriesReply{}
 
 				ok := rf.sendAppendEntries(peerIndex, &args, &reply)
-				DPrintf("leader %v end AE call to %v", rf.me, peerIndex)
+				rf.DPrintf("leader %v end AE call to %v", rf.me, peerIndex)
 
 				sleep := true
 				if ok {
@@ -795,7 +797,7 @@ func (rf *Raft) sendHeartBeatToPeers() {
 					rf.onOtherTerm(reply.Term)
 					if rf.state != Leader {
 						rf.persist()
-						DPrintf("leader %v become follower after AppendEntries response", rf.me)
+						rf.DPrintf("leader %v become follower after AppendEntries response", rf.me)
 						rf.mu.Unlock()
 						return
 					}
@@ -822,7 +824,7 @@ func (rf *Raft) sendHeartBeatToPeers() {
 				}
 
 				//if !ok {
-				//	DPrintf("leader %v sent AppendEntries to %v but no reply from ", leader, peerIndex)
+				//	rf.DPrintf("leader %v sent AppendEntries to %v but no reply from ", leader, peerIndex)
 				//}
 
 				if sleep {
@@ -841,6 +843,7 @@ func (rf *Raft) updateCommittedIndex() {
 		panic(fmt.Sprintf("%v is not leader", rf.me))
 	}
 
+	rf.DPrintf("update commited Index")
 	majority := len(rf.peers) / 2;
 	for n := rf.commitIndex + 1; n <= rf.getLastIndex(); n++ {
 		count := 1
@@ -853,9 +856,12 @@ func (rf *Raft) updateCommittedIndex() {
 				count ++;
 			}
 		}
+		rf.DPrintf("count %v", count)
 		if (rf.getEntryByIndex(n).Term == rf.term && count > majority) {
 			rf.commitIndex = n;
 		}
+		rf.DPrintf("term1 %v, term2 %v", rf.getEntryByIndex(n).Term ,rf.term)
+		rf.DPrintf("commitIndex %v", rf.commitIndex)
 
 	}
 	//rf.applyEntries()
@@ -867,7 +873,7 @@ func (rf *Raft) applyEntries() {
 	//applyMsgChan := rf.applyChan
 	//go func() {
 	//	for applyMsg := range mediateChan {
-	//		DPrintf("rf %v send applyMsg %v", rf.me, applyMsg)
+	//		rf.DPrintf("rf %v send applyMsg %v", rf.me, applyMsg)
 	//		applyMsgChan <- applyMsg
 	//
 	//	}
@@ -937,7 +943,7 @@ func (rf *Raft) startNewElection() {
 			ok := rf.sendRequestVote(index, &args, &reply)
 
 			//if !ok {
-			//	DPrintf("rf %v send request vote to %v fail, %+v", rf.me, index, args)
+			//	rf.DPrintf("rf %v send request vote to %v fail, %+v", rf.me, index, args)
 			//}
 
 			if ok && reply.VoteGranted {
@@ -966,7 +972,7 @@ func (rf *Raft) startNewElection() {
 			}
 			votedCount += voted
 
-			//DPrintf("%v votedCount, %v state", votedCount, rf.state)
+			//rf.DPrintf("%v votedCount, %v state", votedCount, rf.state)
 
 			if (rf.state != Candidate) {
 				rf.mu.Unlock()
@@ -989,4 +995,10 @@ func (rf *Raft) getElectionTimeout() time.Duration {
 	d := time.Duration(rand.Intn(1000 - 550) + 550) * time.Millisecond
 	return d
 
+}
+func (rf *Raft) GetLog() []LogEntry {
+	return rf.log
+}
+func (rf *Raft) GetCommitIndex() int {
+	return rf.commitIndex
 }

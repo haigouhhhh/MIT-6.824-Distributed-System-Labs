@@ -8,17 +8,24 @@ package shardkv
 // talks to the group that holds the key's shard.
 //
 
-import "labrpc"
+import "../labrpc"
 import "crypto/rand"
 import "math/big"
-import "shardmaster"
-import "time"
+import "../shardmaster"
+import (
+	"time"
+	"sync/atomic"
+)
 
 //
 // which shard is a key in?
 // please use this function,
 // and please do not change it.
 //
+var (
+	ID uint64
+)
+
 func key2shard(key string) int {
 	shard := 0
 	if len(key) > 0 {
@@ -40,6 +47,8 @@ type Clerk struct {
 	config   shardmaster.Config
 	make_end func(string) *labrpc.ClientEnd
 	// You will have to modify this struct.
+	serialNo uint64
+	id       uint64
 }
 
 //
@@ -56,6 +65,10 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck.sm = shardmaster.MakeClerk(masters)
 	ck.make_end = make_end
 	// You'll have to add code here.
+	ck.config = ck.sm.Query(-1)
+	ck.id = atomic.AddUint64(&ID, uint64(1))
+
+	StartWatcher(masters, make_end)
 	return ck
 }
 
@@ -66,8 +79,11 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 // You will have to modify this function.
 //
 func (ck *Clerk) Get(key string) string {
-	args := GetArgs{}
-	args.Key = key
+	args := GetArgs{
+		Key: key,
+		ClientId: ck.id,
+		SerialNo: ck.incrementSN(),
+	}
 
 	for {
 		shard := key2shard(key)
@@ -82,6 +98,7 @@ func (ck *Clerk) Get(key string) string {
 					return reply.Value
 				}
 				if ok && (reply.Err == ErrWrongGroup) {
+					//DPrint2("get err wrong group, shard %v, gid %v, config %v", shard, gid, ck.config)
 					break
 				}
 			}
@@ -99,11 +116,13 @@ func (ck *Clerk) Get(key string) string {
 // You will have to modify this function.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	args := PutAppendArgs{}
-	args.Key = key
-	args.Value = value
-	args.Op = op
-
+	args := PutAppendArgs{
+		Key:key,
+		Value:value,
+		Op:op,
+		ClientId:ck.id,
+		SerialNo:ck.incrementSN(),
+	}
 
 	for {
 		shard := key2shard(key)
@@ -132,4 +151,8 @@ func (ck *Clerk) Put(key string, value string) {
 }
 func (ck *Clerk) Append(key string, value string) {
 	ck.PutAppend(key, value, "Append")
+}
+
+func (ck *Clerk) incrementSN() uint64 {
+	return atomic.AddUint64(&ck.serialNo, uint64(1))
 }

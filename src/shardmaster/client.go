@@ -140,3 +140,7 @@ func (ck *Clerk)getLeaderOrRandom() int64 {
 func (ck *Clerk) incrementSN() uint64 {
 	return atomic.AddUint64(&ck.serialNo, uint64(1))
 }
+
+func (ck *Clerk) GetId() uint64 {
+	return ck.id
+}

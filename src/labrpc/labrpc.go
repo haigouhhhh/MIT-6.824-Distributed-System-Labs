@@ -94,15 +94,21 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 
 	e.ch <- req
 
-	rep := <-req.replyCh
-	if rep.ok {
-		rb := bytes.NewBuffer(rep.reply)
-		rd := gob.NewDecoder(rb)
-		if err := rd.Decode(reply); err != nil {
-			log.Fatalf("ClientEnd.Call(): decode reply: %v\n", err)
+	timer := time.NewTimer(30 * time.Second);
+	select {
+	case rep := <-req.replyCh:
+		if rep.ok {
+			rb := bytes.NewBuffer(rep.reply)
+			rd := gob.NewDecoder(rb)
+			if err := rd.Decode(reply); err != nil {
+				log.Fatalf("ClientEnd.Call(): decode reply: %v\n", err)
+			}
+			return true
+		} else {
+			return false
 		}
-		return true
-	} else {
+
+	case <- timer.C:
 		return false
 	}
 }
@@ -160,7 +166,7 @@ func (rn *Network) LongDelays(yes bool) {
 }
 
 func (rn *Network) ReadEndnameInfo(endname interface{}) (enabled bool,
-	servername interface{}, server *Server, reliable bool, longreordering bool,
+servername interface{}, server *Server, reliable bool, longreordering bool,
 ) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
@@ -195,7 +201,7 @@ func (rn *Network) ProcessReq(req reqMsg) {
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 		}
 
-		if reliable == false && (rand.Int()%1000) < 100 {
+		if reliable == false && (rand.Int() % 1000) < 100 {
 			// drop the request, return as if timeout
 			req.replyCh <- replyMsg{false, nil}
 			return
@@ -237,12 +243,12 @@ func (rn *Network) ProcessReq(req reqMsg) {
 		if replyOK == false || serverDead == true {
 			// server was killed while we were waiting; return error.
 			req.replyCh <- replyMsg{false, nil}
-		} else if reliable == false && (rand.Int()%1000) < 100 {
+		} else if reliable == false && (rand.Int() % 1000) < 100 {
 			// drop the reply, return as if timeout
 			req.replyCh <- replyMsg{false, nil}
 		} else if longreordering == true && rand.Intn(900) < 600 {
 			// delay the response for a while
-			ms := 200 + rand.Intn(1+rand.Intn(2000))
+			ms := 200 + rand.Intn(1 + rand.Intn(2000))
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 			req.replyCh <- reply
 		} else {
@@ -357,7 +363,7 @@ func (rs *Server) dispatch(req reqMsg) replyMsg {
 	// split Raft.AppendEntries into service and method
 	dot := strings.LastIndex(req.svcMeth, ".")
 	serviceName := req.svcMeth[:dot]
-	methodName := req.svcMeth[dot+1:]
+	methodName := req.svcMeth[dot + 1:]
 
 	service, ok := rs.services[serviceName]
 
@@ -408,7 +414,7 @@ func MakeService(rcvr interface{}) *Service {
 
 		if method.PkgPath != "" || // capitalized?
 			mtype.NumIn() != 3 ||
-			//mtype.In(1).Kind() != reflect.Ptr ||
+		//mtype.In(1).Kind() != reflect.Ptr ||
 			mtype.In(2).Kind() != reflect.Ptr ||
 			mtype.NumOut() != 0 {
 			// the method is not suitable for a handler
