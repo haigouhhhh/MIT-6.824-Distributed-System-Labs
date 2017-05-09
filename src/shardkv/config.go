@@ -13,7 +13,12 @@ import "sync"
 import "runtime"
 import "../raft"
 import "strconv"
-import "fmt"
+import (
+	"fmt"
+	"log"
+	"net/http"
+)
+import _ "net/http/pprof"
 
 func randstring(n int) string {
 	b := make([]byte, 2 * n)
@@ -356,4 +361,10 @@ func make_config(t *testing.T, n int, unreliable bool, maxraftstate int) *config
 	cfg.net.Reliable(!unreliable)
 
 	return cfg
+}
+func init() {
+
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 }

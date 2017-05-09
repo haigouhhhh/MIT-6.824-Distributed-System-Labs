@@ -84,7 +84,9 @@ type Raft struct {
 	applyChan            chan ApplyMsg
 	lastIncludedIndex    int
 	lastIncludedTerm     int
-	Debug 	int
+	Debug                int
+
+	resetTimeoutChan     chan bool
 }
 
 // return currentTerm and whether this server
@@ -460,29 +462,48 @@ func (rf *Raft) onOtherTerm(otherTerm int) {
 
 //should be protected by rf.mu
 func (rf *Raft) resetElectionTimeout() {
-	rf.DPrintf("rf %v reset timeout", rf.me)
-	if rf.electionTimeoutTimer != nil {
-		rf.electionTimeoutTimer.Stop()
+
+	//if rf.electionTimeoutTimer != nil {
+	//	rf.electionTimeoutTimer.Stop()
+	//}
+	//
+	//term := rf.term
+	//rf.electionTimeoutTimer = time.AfterFunc(rf.getElectionTimeout(), func() {
+	//	rf.mu.Lock()
+	//	defer rf.mu.Unlock()
+	//
+	//	if rf.term == term && rf.state != Leader {
+	//		rf.onElectionTimeout()
+	//	}
+	//})
+
+	select {
+	case rf.resetTimeoutChan <- true:
+	default:
 	}
+}
 
-	timer := time.NewTimer(rf.getElectionTimeout());
+func (rf *Raft) checkoutTimeout() {
 
-	term := rf.term
+	for {
+		select {
+		case <-rf.resetTimeoutChan:
+			if !rf.electionTimeoutTimer.Stop() {
+				select {
+				case <-rf.electionTimeoutTimer.C:
+				default:
+				}
+			}
+			rf.electionTimeoutTimer.Reset(rf.getElectionTimeout())
+		case <-rf.electionTimeoutTimer.C:
+			rf.mu.Lock()
 
-	go func() {
-		<-timer.C
-		rf.mu.Lock()
-		defer rf.mu.Unlock()
-
-		if rf.term != term {
-			return
+			if rf.state != Leader {
+				rf.onElectionTimeout()
+			}
+			rf.mu.Unlock()
 		}
-		rf.onElectionTimeout()
-
-		rf.DPrintf("hw")
-	}()
-	rf.electionTimeoutTimer = timer
-
+	}
 }
 //
 // example code to send a RequestVote RPC to a server.
@@ -635,7 +656,11 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf.lastIncludedIndex = 0
 	rf.lastIncludedTerm = -1
 	rf.readPersist(persister.ReadRaftState())
-	rf.resetElectionTimeout()
+
+	rf.resetTimeoutChan = make(chan bool, 1)
+
+	rf.electionTimeoutTimer = time.NewTimer(rf.getElectionTimeout())
+	go rf.checkoutTimeout()
 	rf.applyEntries()
 
 	return rf
@@ -647,6 +672,22 @@ func (rf *Raft) becomeFollower(newTerm int) {
 	rf.votedFor = -1
 	rf.resetElectionTimeout()
 }
+
+//func (rf *Raft) checkTimeout() {
+//	for {
+//		select {
+//		case <-rf.electionTimeoutTimer.C:
+//			rf.mu.Lock()
+//			if rf.state == Leader {
+//				rf.mu.Unlock()
+//				continue
+//			}
+//			rf.onElectionTimeout()
+//			rf.mu.Unlock()
+//		}
+//
+//	}
+//}
 
 func (rf *Raft) becomeCandidate() {
 	rf.state = Candidate
@@ -700,10 +741,10 @@ func (rf *Raft) becomeLeader() {
 	rf.DPrintf("%v become leader, term %v", rf.me, rf.term)
 	rf.initLeader()
 
-	if rf.electionTimeoutTimer != nil {
-		rf.electionTimeoutTimer.Stop()
-		rf.electionTimeoutTimer = nil
-	}
+	//if rf.electionTimeoutTimer != nil {
+	//	rf.electionTimeoutTimer.Stop()
+	//	rf.electionTimeoutTimer = nil
+	//}
 
 	rf.sendHeartBeatToPeers()
 }
@@ -860,7 +901,7 @@ func (rf *Raft) updateCommittedIndex() {
 		if (rf.getEntryByIndex(n).Term == rf.term && count > majority) {
 			rf.commitIndex = n;
 		}
-		rf.DPrintf("term1 %v, term2 %v", rf.getEntryByIndex(n).Term ,rf.term)
+		rf.DPrintf("term1 %v, term2 %v", rf.getEntryByIndex(n).Term, rf.term)
 		rf.DPrintf("commitIndex %v", rf.commitIndex)
 
 	}
@@ -924,41 +965,65 @@ func (rf *Raft) startNewElection() {
 	votedChan := make(chan int, len(rf.peers))
 	currentTerm := rf.term
 
-	for index := range rf.peers {
-		if index == rf.me {
-			continue
-		}
-		lastLogTerm := rf.lastIncludedTerm
-		if rf.indexExist(rf.getLastIndex()) {
-			lastLogTerm = rf.getLastEntry().Term
-		}
-		args := RequestVoteArgs{
-			Term: rf.term,
-			CandidateId: rf.me,
-			LastLogIndex:rf.getLastIndex(),
-			LastLogTerm: lastLogTerm,
-		}
-		reply := RequestVoteReply{}
-		go func(index int) {
-			ok := rf.sendRequestVote(index, &args, &reply)
-
-			//if !ok {
-			//	rf.DPrintf("rf %v send request vote to %v fail, %+v", rf.me, index, args)
-			//}
-
-			if ok && reply.VoteGranted {
-				votedChan <- 1
-			} else {
-				rf.mu.Lock()
-				rf.onOtherTerm(reply.Term)
-				rf.persist()
-				rf.mu.Unlock()
-
-				votedChan <- 0
-			}
-
-		}(index)
+	lastLogTerm := rf.lastIncludedTerm
+	if rf.indexExist(rf.getLastIndex()) {
+		lastLogTerm = rf.getLastEntry().Term
 	}
+	args := RequestVoteArgs{
+		Term: rf.term,
+		CandidateId: rf.me,
+		LastLogIndex:rf.getLastIndex(),
+		LastLogTerm: lastLogTerm,
+	}
+
+	go func() {
+		var wait sync.WaitGroup
+		wait.Add(len(rf.peers))
+
+		for index := range rf.peers {
+			if index == rf.me {
+				continue
+			}
+			reply := RequestVoteReply{}
+			go func(index int) {
+				ok := rf.sendRequestVote(index, &args, &reply)
+
+				//if !ok {
+				//	rf.DPrintf("rf %v send request vote to %v fail, %+v", rf.me, index, args)
+				//}
+
+				//if ok && reply.VoteGranted {
+				//	votedChan <- 1
+				//} else {
+				//	rf.mu.Lock()
+				//	rf.onOtherTerm(reply.Term)
+				//	rf.persist()
+				//	rf.mu.Unlock()
+				//
+				//	votedChan <- 0
+				//}
+				if ok {
+
+					if reply.VoteGranted {
+						votedChan <- 1
+					} else {
+						rf.mu.Lock()
+						rf.onOtherTerm(reply.Term)
+						rf.persist()
+						rf.mu.Unlock()
+
+						votedChan <- 0
+					}
+				} else {
+					votedChan <- 0
+				}
+				wait.Done()
+
+			}(index)
+		}
+		wait.Wait()
+		close(votedChan)
+	}()
 
 	go func() {
 		votedCount := 1
