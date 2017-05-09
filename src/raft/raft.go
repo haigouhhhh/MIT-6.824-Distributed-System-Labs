@@ -720,7 +720,7 @@ func (rf *Raft) getEntryByIndex(index int) LogEntry {
 	if rf.indexExist(index) {
 		return rf.log[index - 1 - rf.lastIncludedIndex]
 	}
-	panic(fmt.Sprintf("index %v not exist in rf %v", index, rf.me))
+	panic(fmt.Sprintf("index %v not exist in rf %v, rf last inluded index is %v", index, rf.me, rf.lastIncludedIndex))
 }
 
 func (rf *Raft) getLastEntry() LogEntry {
@@ -982,6 +982,7 @@ func (rf *Raft) startNewElection() {
 
 		for index := range rf.peers {
 			if index == rf.me {
+				wait.Done()
 				continue
 			}
 			reply := RequestVoteReply{}
