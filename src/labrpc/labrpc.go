@@ -57,7 +57,9 @@ import "sync"
 import "log"
 import "strings"
 import "math/rand"
-import "time"
+import (
+	"time"
+)
 
 type reqMsg struct {
 	endname  interface{} // name of sending ClientEnd
@@ -94,21 +96,15 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 
 	e.ch <- req
 
-	timer := time.NewTimer(30 * time.Second);
-	select {
-	case rep := <-req.replyCh:
-		if rep.ok {
-			rb := bytes.NewBuffer(rep.reply)
-			rd := gob.NewDecoder(rb)
-			if err := rd.Decode(reply); err != nil {
-				log.Fatalf("ClientEnd.Call(): decode reply: %v\n", err)
-			}
-			return true
-		} else {
-			return false
+	rep := <-req.replyCh
+	if rep.ok {
+		rb := bytes.NewBuffer(rep.reply)
+		rd := gob.NewDecoder(rb)
+		if err := rd.Decode(reply); err != nil {
+			log.Fatalf("ClientEnd.Call(): decode reply: %v\n", err)
 		}
-
-	case <- timer.C:
+		return true
+	} else {
 		return false
 	}
 }
@@ -230,6 +226,7 @@ func (rn *Network) ProcessReq(req reqMsg) {
 			case <-time.After(100 * time.Millisecond):
 				serverDead = rn.IsServerDead(req.endname, servername, server)
 			}
+
 		}
 
 		// do not reply if DeleteServer() has been called, i.e.

@@ -200,7 +200,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	defer kv.mu.Unlock()
 
 	kv.kvPair = make(map[string]string)
-	kv.waitMap = make(map[int]OpResult)
+	kv.waitMap = make(map[int]OpResult, 1)
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
@@ -530,7 +530,7 @@ func (op *Op) execShardCmd(kv *ShardKV) {
 				}
 				if ok {
 					DPrint2("reply %+v", reply)
-				}else{
+				} else {
 					DPrint2("not OK")
 				}
 			}
@@ -721,6 +721,7 @@ func (kv *ShardKV) waitForApply(op Op) (wrongLeader bool, returnErr Err, value s
 		}
 	}()
 
+	start := time.Now()
 	for {
 		select {
 		case err := <-cur.err:
@@ -740,6 +741,11 @@ func (kv *ShardKV) waitForApply(op Op) (wrongLeader bool, returnErr Err, value s
 			if !isLeader || term != originalTerm {
 				wrongLeader = true
 				returnErr = "no longer leader"
+				return
+			}
+
+			if time.Since(start) > 10 * time.Second {
+				returnErr = "timeout to long!"
 				return
 			}
 		}
@@ -778,6 +784,13 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
 	// Your code here, if desired.
+
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	for _, resultChan := range kv.waitMap {
+		resultChan.err <- "server killed"
+	}
 }
 
 func (kv *ShardKV) snapshot(index int) (doSnapshot bool) {
@@ -788,10 +801,13 @@ func (kv *ShardKV) snapshot(index int) (doSnapshot bool) {
 	if size > kv.maxraftstate {
 		kv.mu.Lock()
 		defer kv.mu.Unlock()
-		DPrintf("kv %v, begin snapshot", kv.me)
-		kv.rf.TruncateLog(index, kv.encodeToSnapShot())
-		doSnapshot = true
-		DPrintf("kv %v, end snapshot", kv.me)
+		if  kv.rf.GetRaftStateSize() > kv.maxraftstate {
+			DPrintf("kv %v, begin snapshot", kv.me)
+			kv.rf.TruncateLog(index, kv.encodeToSnapShot())
+			doSnapshot = true
+			DPrintf("kv %v, end snapshot", kv.me)
+
+		}
 	}
 	return
 
